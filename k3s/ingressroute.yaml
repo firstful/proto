@@ -1,0 +1,20 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: proto
+  namespace: proto
+spec:
+  entryPoints:
+    - web
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`proto.ffilt.us`)
+      services:
+        - name: proto
+          port: 80
+    - kind: Rule
+      match: Host(`proto.homelab.internal`)
+      services:
+        - name: proto
+          port: 80
