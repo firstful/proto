@@ -86,6 +86,40 @@ func (s *Server) Handler(webapp []byte) http.Handler {
 	mux.HandleFunc("GET /api/fanout/{id}", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, s.Broker.Ledger().GetFanout(r.PathValue("id")))
 	})
+	mux.HandleFunc("GET /api/username_claims", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, s.Broker.Claims().List())
+	})
+	mux.HandleFunc("GET /api/username_claims/{nickname}", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, s.Broker.Claims().Get(r.PathValue("nickname")))
+	})
+	mux.HandleFunc("POST /api/username_claims", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Nickname  string `json:"nickname"`
+			Handle    string `json:"handle"`
+			PublicKey string `json:"public_key"`
+			Signature string `json:"signature"`
+			Timestamp int64  `json:"timestamp"`
+			ClaimMsg  string `json:"claim_message"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		rec := &ClaimRecord{
+			Nickname:  req.Nickname,
+			Handle:    req.Handle,
+			PublicKey: req.PublicKey,
+			Signature: req.Signature,
+			Timestamp: req.Timestamp,
+			ClaimMsg:  req.ClaimMsg,
+		}
+		winner, ok, err := s.Broker.Claims().Claim(rec)
+		if err != nil {
+			http.Error(w, err.Error(), 422)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": ok, "winner": winner})
+	})
 	mux.HandleFunc("POST /api/delegate", func(w http.ResponseWriter, r *http.Request) {
 		// Server-side blocking delegate for thin clients (Hermes plugin).
 		// parent_task nests this delegation under an existing task tree so

@@ -36,6 +36,7 @@ type Broker struct {
 	waiters   map[string][]chan struct{} // "task:<id>" / "fanout:<id>" gather keys
 	waitersMu sync.Mutex
 	cmds      map[string]CmdFunc // !{name} broker commands (D-class)
+	claims    *ClaimsStore         // durable username claims
 }
 
 func NewBroker(journalPath string) *Broker {
@@ -49,9 +50,11 @@ func NewBroker(journalPath string) *Broker {
 		ring:    list.New(),
 		ringMax: 5000,
 		waiters: map[string][]chan struct{}{},
+		claims:  NewClaimsStore(),
 	}
 	if journalPath != "" {
 		b.journal = OpenJournal(journalPath)
+		b.claims.SetJournal(b.journal)
 	}
 	registerBuiltinCmds(b)
 	return b
@@ -95,6 +98,9 @@ func registerBuiltinCmds(b *Broker) {
 }
 
 func (b *Broker) Ledger() *Ledger { return b.ledger }
+
+// Claims returns the username claims store.
+func (b *Broker) Claims() *ClaimsStore { return b.claims }
 
 // Subscribe registers a handler for a route; flushes any parked envelopes.
 func (b *Broker) Subscribe(route, subID string, fn Handler, cancel func()) {
@@ -442,7 +448,13 @@ func (b *Broker) Restore() error {
 	if err != nil {
 		return err
 	}
+	nClaims := 0
 	for _, tagged := range envs {
+		if tagged.Claim != nil {
+			b.claims.Restore(tagged.Claim)
+			nClaims++
+			continue
+		}
 		env := tagged.Env
 		b.mu.Lock()
 		b.seen[env.ID] = true
@@ -462,7 +474,7 @@ func (b *Broker) Restore() error {
 			}
 		}
 	}
-	log.Printf("proto: restored %d envelopes from journal", len(envs))
+	log.Printf("proto: restored %d envelopes, %d username claims from journal", len(envs)-nClaims, nClaims)
 	return nil
 }
 
