@@ -268,7 +268,7 @@ def _req(method: str, path: str, body: dict | None = None, timeout: int = _TIMEO
 
 # ---------------------------------------------------------------- tools ---
 
-def _handle_status(args: dict) -> dict:
+def _handle_status(args: dict, **_) -> dict:
     rooms = _req("GET", "/api/rooms")
     agents = _req("GET", "/api/agents")
     # Also return claimed usernames for awareness
@@ -289,7 +289,7 @@ _STATUS_SCHEMA = {
     "parameters": {"type": "object", "properties": {}},
 }
 
-def _handle_send(args: dict) -> dict:
+def _handle_send(args: dict, **_) -> dict:
     to = {"peer": args["peer"]} if args.get("peer") else {"room": args["room"]}
     env = {
         "v": 1, "kind": "msg", "from": _handle(), "to": to, "text": args["text"],
@@ -312,7 +312,7 @@ _SEND_SCHEMA = {
         "anyOf": [{"required": ["peer"]}, {"required": ["room"]}, {"required": ["text"]}]},
 }
 
-def _handle_task(args: dict) -> dict:
+def _handle_task(args: dict, **_) -> dict:
     to = {"peer": args["peer"]} if args.get("peer") else {"room": args["room"]}
     env = {
         "v": 1, "kind": "task", "from": _handle(), "to": to,
@@ -347,7 +347,7 @@ _TASK_SCHEMA = {
         "required": ["action"]},
 }
 
-def _handle_results(args: dict) -> dict:
+def _handle_results(args: dict, **_) -> dict:
     handle = args.get("handle", _handle())
     return {"inbox": _req("GET", f"/api/inbox/{handle}")}
 
@@ -358,7 +358,7 @@ _RESULTS_SCHEMA = {
         "handle": {"type": "string", "description": "Override handle (default: this agent)"}}},
 }
 
-def _handle_task_info(args: dict) -> dict:
+def _handle_task_info(args: dict, **_) -> dict:
     return _req("GET", f"/api/task/{args['task_id']}")
 
 _TASKINFO_SCHEMA = {
@@ -368,7 +368,7 @@ _TASKINFO_SCHEMA = {
         "task_id": {"type": "string"}}, "required": ["task_id"]},
 }
 
-def _handle_delegate(args: dict) -> dict:
+def _handle_delegate(args: dict, **_) -> dict:
     body = {
         "from": _handle(), "peer": args["peer"], "action": args["action"],
         "timeout_sec": args.get("timeout", 30)
@@ -398,7 +398,7 @@ _DELEGATE_SCHEMA = {
         "required": ["peer", "action"]},
 }
 
-def _handle_fanout(args: dict) -> dict:
+def _handle_fanout(args: dict, **_) -> dict:
     body = {
         "from": _handle(), "peers": args["peers"], "action": args["action"],
         "barrier": args.get("barrier", "all"),
@@ -428,7 +428,7 @@ _FANOUT_SCHEMA = {
         "required": ["peers", "action"]},
 }
 
-def _handle_announce(args: dict) -> dict:
+def _handle_announce(args: dict, **_) -> dict:
     _req("POST", f"/api/rooms/{args['room']}/join/{_handle()}")
     env = {
         "v": 1, "kind": "msg", "from": _handle(), "to": {"room": args["room"]},
@@ -443,7 +443,7 @@ _ANNOUNCE_SCHEMA = {
         "required": ["room", "text"]},
 }
 
-def _handle_cmd(args: dict) -> dict:
+def _handle_cmd(args: dict, **_) -> dict:
     """D-class: broker-intercepted command. Peers never see it; we get a
     status envelope back at our reply_target."""
     cmd = args["cmd"].strip()
@@ -471,7 +471,7 @@ _CMD_SCHEMA = {
         "required": ["cmd"]},
 }
 
-def _handle_claim_username(args: dict) -> dict:
+def _handle_claim_username(args: dict, **_) -> dict:
     """Explicitly attempt to claim a username."""
     nickname = args.get("nickname")
     if not nickname:
@@ -500,7 +500,7 @@ _CLAIM_USERNAME_SCHEMA = {
         "required": ["nickname"]},
 }
 
-def _handle_list_usernames(args: dict) -> dict:
+def _handle_list_usernames(args: dict, **_) -> dict:
     """List all currently claimed usernames (refreshed from the broker)."""
     claims = _req("GET", "/api/username_claims")
     return {
@@ -523,18 +523,28 @@ _LIST_USERNAMES_SCHEMA = {
 }
 
 # Tool registration tuple list
+def _json_result(handler):
+    """Hermes tool handlers must return str; JSON-encode dict results."""
+    import json as _json
+    def wrapper(args: dict, **kw):
+        out = handler(args, **kw)
+        return out if isinstance(out, str) else _json.dumps(out, ensure_ascii=False)
+    wrapper.__name__ = handler.__name__
+    return wrapper
+
+
 _TOOLS = (
-    (_handle_status,    _STATUS_SCHEMA),
-    (_handle_send,      _SEND_SCHEMA),
-    (_handle_task,      _TASK_SCHEMA),
-    (_handle_results,   _RESULTS_SCHEMA),
-    (_handle_task_info, _TASKINFO_SCHEMA),
-    (_handle_delegate,  _DELEGATE_SCHEMA),
-    (_handle_fanout,    _FANOUT_SCHEMA),
-    (_handle_announce,  _ANNOUNCE_SCHEMA),
-    (_handle_cmd,       _CMD_SCHEMA),
-    (_handle_claim_username, _CLAIM_USERNAME_SCHEMA),
-    (_handle_list_usernames, _LIST_USERNAMES_SCHEMA),
+    (_json_result(_handle_status),    _STATUS_SCHEMA),
+    (_json_result(_handle_send),      _SEND_SCHEMA),
+    (_json_result(_handle_task),      _TASK_SCHEMA),
+    (_json_result(_handle_results),   _RESULTS_SCHEMA),
+    (_json_result(_handle_task_info), _TASKINFO_SCHEMA),
+    (_json_result(_handle_delegate),  _DELEGATE_SCHEMA),
+    (_json_result(_handle_fanout),    _FANOUT_SCHEMA),
+    (_json_result(_handle_announce),  _ANNOUNCE_SCHEMA),
+    (_json_result(_handle_cmd),       _CMD_SCHEMA),
+    (_json_result(_handle_claim_username), _CLAIM_USERNAME_SCHEMA),
+    (_json_result(_handle_list_usernames), _LIST_USERNAMES_SCHEMA),
 )
 
 def _register_agent() -> None:
