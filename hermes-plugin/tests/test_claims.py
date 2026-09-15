@@ -66,7 +66,7 @@ class TestClaimFlow(unittest.TestCase):
         cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
         cls.thread.start()
         P._BROKER = f"http://127.0.0.1:{cls.port}"
-        P._HANDLE = "hermes:test"
+        os.environ["PROTO_HANDLE"] = "hermes:test"
         P._CLAIMED_USERNAMES = {}
 
     @classmethod
@@ -87,20 +87,20 @@ class TestClaimFlow(unittest.TestCase):
 
     def test_claim_success_and_cache(self):
         with self.temp_key() as (path, priv):
-            P._KEY_PATH = path
+            P._KEY_PATHS.clear()
             self.assertTrue(P._claim_nickname("nick_a"))
             self.assertIn("nick_a", P._CLAIMED_USERNAMES)
             # Second attempt on a taken name by a different handle loses.
-            P._HANDLE = "hermes:other"
+            os.environ["PROTO_HANDLE"] = "hermes:other"
             with self.temp_key() as (path2, _):
-                P._KEY_PATH = path2
+                P._KEY_PATHS.clear()
                 self.assertFalse(P._claim_nickname("nick_a"))
-            P._HANDLE = "hermes:test"
+            os.environ["PROTO_HANDLE"] = "hermes:test"
             P._KEY_PATH = path
 
     def test_restart_reclaim_same_handle_succeeds(self):
         with self.temp_key() as (path, priv):
-            P._KEY_PATH = path
+            P._KEY_PATHS.clear()
             self.assertTrue(P._claim_nickname("nick_b"))
             P._CLAIMED_USERNAMES = {}  # simulate restart amnesia
             # Same handle re-claims: FCFS loss but winner is ours+valid -> True
@@ -108,7 +108,7 @@ class TestClaimFlow(unittest.TestCase):
 
     def test_list_usernames(self):
         with self.temp_key() as (path, priv):
-            P._KEY_PATH = path
+            P._KEY_PATHS.clear()
             P._claim_nickname("nick_c")
             out = P._handle_list_usernames({})
             self.assertGreaterEqual(out["total"], 1)

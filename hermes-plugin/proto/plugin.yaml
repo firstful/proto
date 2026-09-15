@@ -13,3 +13,10 @@ provides_tools:
   - proto_fanout
   - proto_announce
   - proto_cmd
+  - proto_claim_username
+  - proto_list_usernames
+
+requires_env:
+  - PROTO_URL
+  - PROTO_HANDLE
+  - PROTO_NICKNAME

@@ -9,20 +9,21 @@ Profile multiplexing: every Hermes profile gets its OWN agent handle on the
 shared broker, derived at runtime — `hermes:<profile>` — so multiple profiles
 (rook, reed, boris, ...) multiplex one broker with separate inboxes and no
 cross-talk. Resolution order:
-    PROTO_HANDLE (explicit override) → HERMES_PROFILE env → 'default'.
+    PROTO_HANDLE (full handle override) → HERMES_SESSION_PROFILE /
+    HERMES_PROFILE env → 'default' (name overridden to 'rook'; set
+    PROTO_DEFAULT_NAME to change that).
 
 Config via env:
-    PROTO_URL      broker base URL   (default http://127.0.0.1:8808)
-    PROTO_HANDLE   explicit handle override (default hermes:<profile>)
-    PROTO_NICKNAME desired nickname for username allocation (optional)
+    PROTO_URL          broker base URL   (default http://127.0.0.1:8808)
+    PROTO_HANDLE       explicit handle override (default hermes:<profile>)
+    PROTO_NAME         explicit nickname override (default <profile>)
+    PROTO_DEFAULT_NAME broker name for the default profile (default rook)
+    PROTO_NICKNAME     legacy nickname override (still honored)
 
 Username allocation:
-    At startup, the plugin attempts to claim its configured nickname by:
-    1. Creating a new ephemeral keypair (stored in ~/.hermes/proto_keys/)
-    2. Publishing a CLAIM envelope with the public key and signed username
-    3. Waiting briefly to see if any conflict arises (first-come-first-serve)
-    4. If uncontested, the username is considered claimed
-    All plugins scan for CLAIM envelopes at startup to build a username map
+    At startup the plugin AUTO-CLAIMS its profile-derived nickname (FCFS,
+    Ed25519-signed, journaled broker-side). Set PROTO_NAME or PROTO_NICKNAME
+    to claim something other than the profile name.
 """
 
 from __future__ import annotations
@@ -46,22 +47,56 @@ import urllib.request
 
 _BROKER = os.environ.get("PROTO_URL", "http://127.0.0.1:8808")
 
+# Profile-name override: the default profile identifies as "rook" on the
+# broker; every other profile auto-connects as its own profile name.
+_DEFAULT_PROFILE_OVERRIDE_ENV = "PROTO_DEFAULT_NAME"
+_DEFAULT_PROFILE_NAME = "rook"
+
+
+def _profile_name() -> str:
+    """Name this session identifies with on the broker.
+
+    Order: PROTO_HANDLE (full handle override) → PROTO_NAME (name override)
+    → HERMES_SESSION_PROFILE / HERMES_PROFILE (active profile) → default.
+    """
+    explicit = os.environ.get("PROTO_HANDLE")
+    if explicit:
+        return explicit.split(":", 1)[-1] if explicit.startswith("hermes:") else explicit
+    named = os.environ.get("PROTO_NAME")
+    if named:
+        return named
+    profile = (
+        os.environ.get("HERMES_SESSION_PROFILE")
+        or os.environ.get("HERMES_PROFILE")
+        or "default"
+    )
+    if profile == "default":
+        return os.environ.get(_DEFAULT_PROFILE_OVERRIDE_ENV, _DEFAULT_PROFILE_NAME)
+    return profile
+
+
 def _resolve_handle() -> str:
     """Runtime profile-scoped handle (multiplexing; see SPEC §11)."""
     explicit = os.environ.get("PROTO_HANDLE")
     if explicit:
         return explicit
-    profile = os.environ.get("HERMES_PROFILE") or "default"
-    return f"hermes:{profile}"
+    return f"hermes:{_profile_name()}"
 
-_HANDLE = _resolve_handle()
+
 _TIMEOUT = 60
 
 # Username allocation storage
 _KEY_DIR = Path(os.environ.get("HERMES_HOME", "~/.hermes")).expanduser() / "proto_keys"
 _USERNAME_CLAIM_ROOM = "username_claims"  # Room for all username claims
 _CLAIMED_USERNAMES: Dict[str, Tuple[str, str, str]] = {}  # nickname -> (handle, pubkey_b64, signature)
-_KEY_PATH: Optional[Path] = None
+_KEY_PATHS: Dict[str, Path] = {}  # handle -> key file (lazy, per-handle)
+
+
+def _handle() -> str:
+    """Current session's broker handle — resolved lazily per call so gateway
+    sessions on different profiles multiplex correctly in one process."""
+    return _resolve_handle()
+
 
 def _ensure_crypto():
     """Ensure crypto dependencies are available."""
@@ -73,17 +108,20 @@ def _ensure_crypto():
 
 def _get_keypair() -> Tuple[Path, 'ed25519.Ed25519PrivateKey']:
     """Get or create the persistent keypair for this handle (on-disk, reused)."""
-    global _KEY_PATH
+    handle = _handle()
     _ensure_crypto()
-    if _KEY_PATH is None:
+    key_path = _KEY_PATHS.get(handle)
+    if key_path is None:
         _KEY_DIR.mkdir(parents=True, exist_ok=True)
-        _KEY_PATH = _KEY_DIR / f"{_HANDLE.replace(':', '_')}.key"
+        key_path = _KEY_DIR / f"{handle.replace(':', '_')}.key"
+        _KEY_PATHS[handle] = key_path
+    _KEY_PATH = key_path
 
-    if _KEY_PATH.exists():
+    if key_path.exists():
         # Load existing key
         try:
-            with open(_KEY_PATH, "rb") as f:
-                return _KEY_PATH, serialization.load_pem_private_key(
+            with open(key_path, "rb") as f:
+                return key_path, serialization.load_pem_private_key(
                     f.read(), password=None)
         except Exception:
             pass  # corrupted — fall through and regenerate
@@ -95,12 +133,12 @@ def _get_keypair() -> Tuple[Path, 'ed25519.Ed25519PrivateKey']:
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption())
-    tmp = _KEY_PATH.with_suffix(".tmp")
+    tmp = key_path.with_suffix(".tmp")
     with open(tmp, "wb") as f:
         f.write(pem)
     os.chmod(tmp, 0o600)
-    os.replace(tmp, _KEY_PATH)
-    return _KEY_PATH, private_key
+    os.replace(tmp, key_path)
+    return key_path, private_key
 
 def _sign_message(private_key, message: str) -> str:
     """Sign a message and return base64-encoded signature."""
@@ -173,7 +211,7 @@ def _claim_nickname(nickname: str) -> bool:
         # Submit claim to the broker's atomic claim store
         body = {
             "nickname": nickname,
-            "handle": _HANDLE,
+            "handle": _handle(),
             "public_key": pubkey_b64,
             "signature": signature,
             "timestamp": int(time.time()),
@@ -186,7 +224,7 @@ def _claim_nickname(nickname: str) -> bool:
         if not won and winner:
             # FCFS loss: someone already holds this nickname. Accept only if
             # it's us (restart re-claim) AND their signature verifies.
-            ours = winner.get("handle") == _HANDLE
+            ours = winner.get("handle") == _handle()
             legit = _verify_signature(
                 winner.get("public_key", ""),
                 winner.get("claim_message", ""),
@@ -209,7 +247,7 @@ def _claim_nickname(nickname: str) -> bool:
                 return False
             # Cache the winning record
             _CLAIMED_USERNAMES[nickname] = (
-                winner.get("handle", _HANDLE),
+                winner.get("handle", _handle()),
                 winner.get("public_key", pubkey_b64),
                 winner.get("signature", signature),
             )
@@ -235,7 +273,7 @@ def _handle_status(args: dict) -> dict:
     agents = _req("GET", "/api/agents")
     # Also return claimed usernames for awareness
     return {
-        "handle": _HANDLE, 
+        "handle": _handle(), 
         "broker": _BROKER, 
         "rooms": rooms,
         "agents": agents,
@@ -254,8 +292,8 @@ _STATUS_SCHEMA = {
 def _handle_send(args: dict) -> dict:
     to = {"peer": args["peer"]} if args.get("peer") else {"room": args["room"]}
     env = {
-        "v": 1, "kind": "msg", "from": _HANDLE, "to": to, "text": args["text"],
-        "reply_target": {"peer": args.get("reply_target", _HANDLE)}
+        "v": 1, "kind": "msg", "from": _handle(), "to": to, "text": args["text"],
+        "reply_target": {"peer": args.get("reply_target", _handle())}
     }
     if args.get("on_behalf_of"):
         env["on_behalf_of"] = args["on_behalf_of"]
@@ -277,9 +315,9 @@ _SEND_SCHEMA = {
 def _handle_task(args: dict) -> dict:
     to = {"peer": args["peer"]} if args.get("peer") else {"room": args["room"]}
     env = {
-        "v": 1, "kind": "task", "from": _HANDLE, "to": to,
+        "v": 1, "kind": "task", "from": _handle(), "to": to,
         "task": {"action": args["action"], **( {"params": args["params"]} if args.get("params") else {})},
-        "reply_target": {"peer": args.get("reply_target", _HANDLE)}
+        "reply_target": {"peer": args.get("reply_target", _handle())}
     }
     if args.get("on_behalf_of"):
         env["on_behalf_of"] = args["on_behalf_of"]
@@ -310,7 +348,7 @@ _TASK_SCHEMA = {
 }
 
 def _handle_results(args: dict) -> dict:
-    handle = args.get("handle", _HANDLE)
+    handle = args.get("handle", _handle())
     return {"inbox": _req("GET", f"/api/inbox/{handle}")}
 
 _RESULTS_SCHEMA = {
@@ -332,7 +370,7 @@ _TASKINFO_SCHEMA = {
 
 def _handle_delegate(args: dict) -> dict:
     body = {
-        "from": _HANDLE, "peer": args["peer"], "action": args["action"],
+        "from": _handle(), "peer": args["peer"], "action": args["action"],
         "timeout_sec": args.get("timeout", 30)
     }
     if args.get("params"):
@@ -362,7 +400,7 @@ _DELEGATE_SCHEMA = {
 
 def _handle_fanout(args: dict) -> dict:
     body = {
-        "from": _HANDLE, "peers": args["peers"], "action": args["action"],
+        "from": _handle(), "peers": args["peers"], "action": args["action"],
         "barrier": args.get("barrier", "all"),
         "timeout_sec": args.get("timeout", 60)
     }
@@ -391,10 +429,10 @@ _FANOUT_SCHEMA = {
 }
 
 def _handle_announce(args: dict) -> dict:
-    _req("POST", f"/api/rooms/{args['room']}/join/{_HANDLE}")
+    _req("POST", f"/api/rooms/{args['room']}/join/{_handle()}")
     env = {
-        "v": 1, "kind": "msg", "from": _HANDLE, "to": {"room": args["room"]},
-        "text": args["text"], "reply_target": {"peer": _HANDLE}}
+        "v": 1, "kind": "msg", "from": _handle(), "to": {"room": args["room"]},
+        "text": args["text"], "reply_target": {"peer": _handle()}}
     return _req("POST", "/api/envelope", env)
 
 _ANNOUNCE_SCHEMA = {
@@ -412,14 +450,14 @@ def _handle_cmd(args: dict) -> dict:
     if not cmd.startswith("!{"):
         cmd = f"!{{{cmd}}}"
     env = {
-        "v": 1, "kind": "cmd", "from": _HANDLE, "to": {"peer": "broker"},
-        "text": cmd, "reply_target": {"peer": _HANDLE}}
+        "v": 1, "kind": "cmd", "from": _handle(), "to": {"peer": "broker"},
+        "text": cmd, "reply_target": {"peer": _handle()}}
     _req("POST", "/api/envelope", env)
     # status comes back to our route; poll the inbox briefly
     import time
     for _ in range(20):
         time.sleep(0.1)
-        inbox = _req("GET", f"/api/inbox/{_HANDLE}")
+        inbox = _req("GET", f"/api/inbox/{_handle()}")
         for e in inbox or []:
             if e.get("kind") == "status" and (e.get("status") or {}).get("cmd"):
                 return e["status"]
@@ -444,7 +482,7 @@ def _handle_claim_username(args: dict) -> dict:
         return {
             "status": "claimed",
             "nickname": nickname,
-            "handle": _HANDLE,
+            "handle": _handle(),
             "message": f"Successfully claimed username '{nickname}'"
         }
     else:
@@ -499,16 +537,33 @@ _TOOLS = (
     (_handle_list_usernames, _LIST_USERNAMES_SCHEMA),
 )
 
+def _register_agent() -> None:
+    """Announce this profile on the broker: a ping cmd envelope both registers
+    the agent handle (agents are derived from envelope traffic) and verifies
+    the broker is reachable. Idempotent."""
+    try:
+        env = {
+            "v": 1, "kind": "cmd", "from": _handle(), "to": {"peer": "broker"},
+            "text": "!{ping}", "reply_target": {"peer": _handle()}}
+        _req("POST", "/api/envelope", env)
+        # drain the status reply so it doesn't sit in the inbox
+        try:
+            _req("GET", f"/api/inbox/{_handle()}")
+        except Exception:
+            pass
+    except Exception:
+        pass  # broker down — tools will surface connection errors on use
+
+
 def register(ctx) -> None:
-    """Hermes plugin entrypoint."""
-    # Attempt to claim configured nickname at startup
-    nickname = os.environ.get("PROTO_NICKNAME")
-    if nickname:
-        print(f"[PROTO plugin:proto ] Attempting to claim username: {nickname}")
-        if _claim_nickname(nickname):
-            print(f"[ plugin:proto ] Successfully claimed username: {nickname}")
-        else:
-            print(f"[ plugin:proto ] Failed to claim username: {nickname} (may be taken)")
+    """Hermes plugin entrypoint: auto-connect as this profile's name."""
+    nickname = os.environ.get("PROTO_NICKNAME") or _profile_name()
+    _register_agent()
+    print(f"[proto] connecting as {_handle()} (nickname: {nickname})")
+    if _claim_nickname(nickname):
+        print(f"[proto] username '{nickname}' claimed")
+    else:
+        print(f"[proto] username '{nickname}' unavailable (already claimed)")
     
     # Register all tools
     for handler, schema in _TOOLS:
