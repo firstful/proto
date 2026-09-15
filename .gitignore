@@ -1,2 +1,4 @@
 bin/
 *.jsonl
+__pycache__/
+*.pyc
