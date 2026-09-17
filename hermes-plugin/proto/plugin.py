@@ -45,7 +45,7 @@ except ImportError:
 
 import urllib.request
 
-_BROKER = os.environ.get("PROTO_URL", "http://127.0.0.1:8808")
+_BROKER = os.environ.get("PROTO_URL", "http://proto.homelab.internal:8808")
 
 # Profile-name override: the default profile identifies as "rook" on the
 # broker; every other profile auto-connects as its own profile name.
