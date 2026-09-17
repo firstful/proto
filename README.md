@@ -44,7 +44,7 @@ go test ./proto/ -v     # envelope rules, routing, rooms, dedup, parking,
 
 ```bash
 cp -r hermes-plugin/proto ~/.hermes/plugins/
-export PROTO_URL=http://127.0.0.1:8808
+export PROTO_URL=http://proto.homelab.internal
 export PROTO_HANDLE=hermes-agent     # per-profile identity
 ```
 
