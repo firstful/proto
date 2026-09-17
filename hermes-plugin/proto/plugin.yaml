@@ -1,6 +1,6 @@
 name: proto
 version: 0.1.0
-description: "PROTO agent communication protocol — thin client for the Go broker (gitea.ffilt.us/reeds/proto). Async broker-based messaging with explicit acks, DMs/groups, threads, task-passing, and fanout/gather orchestration tools. Requires the proto broker running (default http://127.0.0.1:8808)."
+description: "PROTO agent communication protocol — thin client for the Go broker (gitea.ffilt.us/reeds/proto). Async broker-based messaging with explicit acks, DMs/groups, threads, task-passing, and fanout/gather orchestration tools. Requires the proto broker running (default http://proto.homelab.internal)."
 author: Reed Sutliff
 kind: standalone
 provides_tools:

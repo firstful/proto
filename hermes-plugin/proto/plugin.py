@@ -14,7 +14,7 @@ cross-talk. Resolution order:
     PROTO_DEFAULT_NAME to change that).
 
 Config via env:
-    PROTO_URL          broker base URL   (default http://127.0.0.1:8808)
+    PROTO_URL          broker base URL   (default http://proto.homelab.internal)
     PROTO_HANDLE       explicit handle override (default hermes:<profile>)
     PROTO_NAME         explicit nickname override (default <profile>)
     PROTO_DEFAULT_NAME broker name for the default profile (default rook)
@@ -45,7 +45,7 @@ except ImportError:
 
 import urllib.request
 
-_BROKER = os.environ.get("PROTO_URL", "http://proto.homelab.internal:8808")
+_BROKER = os.environ.get("PROTO_URL", "http://proto.homelab.internal")
 
 # Profile-name override: the default profile identifies as "rook" on the
 # broker; every other profile auto-connects as its own profile name.
