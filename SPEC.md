@@ -401,3 +401,104 @@ T-root (user:reed → hermes:rook)
   `failed` if any descendant failed, `open` while any is open, else `done`.
 - Fanouts nest the same way (`parent_task` on the fanout task), so
   orchestrations of arbitrary depth stay observable from the root.
+
+## 13. REST API error responses (v1)
+
+All REST API endpoints return structured JSON error bodies on 4xx/5xx
+responses (instead of bare text).
+
+### 13.1 Shape
+
+```jsonc
+{
+  "error": {
+    "code": "VALIDATION_ERROR",       // machine-readable error code
+    "message": "Invalid envelope",    // human-readable summary
+    "details": {                      // optional; context-specific fields
+      "field": "kind",
+      "reason": "bad kind \"bogus\""
+    }
+  },
+  "request": {                        // present when the handler received a
+    "method": "POST",                 //   well-formed HTTP request
+    "path": "/api/envelope",
+    "handle": "hermes:dev",
+    "profile": "hermes:dev",
+    "envelope_id": "abc123",
+    "envelope_kind": "msg"
+  }
+}
+```
+
+### 13.2 Error codes (by category)
+
+#### Envelope validation (`POST /api/envelope` returns 422)
+
+| Code | Meaning |
+|------|---------|
+| `INVALID_ENVELOPE` | Generic envelope-level validation failure |
+| `BAD_KIND` | Unknown or unsupported `kind` value |
+| `BAD_FROM_HANDLE` | `from` does not match handle regex |
+| `BAD_ROUTE` | Delivery route (peer/room) is invalid |
+| `MISSING_REPLY_TARGET` | `reply_target` required for this kind |
+| `MISSING_ACK_TYPE` | Ack envelope missing `ack.type` |
+| `BAD_ACK_TYPE` | Invalid `ack.type` value |
+| `ACK_CARRIES_TEXT` | Pure ack envelope must not carry text |
+| `MISSING_TASK_ACTION` | Task envelope missing `task.action` |
+| `MISSING_FAIL_BODY` | Fail envelope missing `fail{code,msg}` |
+| `MISSING_RESULT_PAYLOAD` | Result envelope missing payload |
+| `MISSING_TOOL_BODY` | Tool envelope missing tool body |
+| `MISSING_TOOL_NAME` | Tool call missing `tool.name` |
+| `BAD_CMD_FORMAT` | Cmd envelope text must be `!{name} ...` |
+| `CMD_WRONG_TARGET` | Cmd must address `peer:broker` or a room |
+| `MISSING_STATUS_BODY` | Status envelope missing status body |
+| `ENVELOPE_TOO_LARGE` | Serialized envelope exceeds 128 KiB |
+| `INVALID_ABOUT_FIELD` | `about` must be string or `{task_id}` object |
+
+#### Username claims (`POST /api/username_claims` returns 422)
+
+| Code | Meaning |
+|------|---------|
+| `INVALID_CLAIM_RECORD` | Missing or malformed claim fields |
+| `CLAIM_EXPIRED` | Timestamp is more than 300 seconds old |
+| `BAD_SIGNATURE` | Ed25519 signature verification failed |
+
+#### Policy enforcement (various endpoints, status varies)
+
+| Code | Meaning |
+|------|---------|
+| `POLICY_DENIED` | Generic policy denial |
+| `NO_POLICY_FILE` | Profile has no policy file; messaging denied |
+| `ACTION_NOT_PERMITTED` | Action not in `allowed_actions` |
+| `PEER_NOT_ALLOWED` | Target peer not in `allowed_peers` |
+| `ROOM_NOT_ALLOWED` | Target room not in `allowed_rooms` |
+| `ON_BEHALF_OF_NOT_PERMITTED` | `on_behalf_of` denied for this profile |
+| `GRANT_SEND_ONLY` | Grant covers `send` only, not the requested action |
+
+#### Client errors (400)
+
+| Code | Meaning |
+|------|---------|
+| `INVALID_JSON` | Request body is not valid JSON |
+
+### 13.3 Request context
+
+Every structured error response includes a `request` object with:
+- **method** — HTTP method
+- **path** — URL path
+- **handle** — sender handle (if known)
+- **profile** — derived profile name (if handle known)
+- **envelope_id** — envelope ID (if applicable)
+- **envelope_kind** — envelope kind (if applicable)
+
+### 13.4 Structured logging
+
+The broker logs every rejected request with structured fields (JSON log
+line) at the reject point:
+- `timestamp`, `method`, `path`, `remote_addr`
+- `handle`, `profile`
+- `envelope_id`, `envelope_kind`
+- `error_code`, `reason`
+- `details` — additional context (field, action, target, etc.)
+
+No secrets, credentials, or message content are logged.

@@ -230,7 +230,7 @@ func TestFanoutGather(t *testing.T) {
 	// user asks AgentA (T0), reply_target = user
 	err := b.Publish(&Envelope{Kind: KindTask, From: user.Handle,
 		To: Target{Peer: "AgentA"}, AboutTaskID: "T0",
-		Task: &Task{Action: "deep_research"},
+		Task:        &Task{Action: "deep_research"},
 		ReplyTarget: &Target{Peer: "user:reed"}})
 	if err != nil {
 		t.Fatal(err)

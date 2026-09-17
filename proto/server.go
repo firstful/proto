@@ -96,9 +96,9 @@ func (s *Server) Handler(webapp []byte) http.Handler {
 	})
 	mux.HandleFunc("POST /api/policy/revoke", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			From     string `json:"from"`
-			To       string `json:"to"`
-			Request  string `json:"requester"`
+			From    string `json:"from"`
+			To      string `json:"to"`
+			Request string `json:"requester"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), 400)
@@ -118,11 +118,13 @@ func (s *Server) Handler(webapp []byte) http.Handler {
 	mux.HandleFunc("POST /api/envelope", func(w http.ResponseWriter, r *http.Request) {
 		var env Envelope
 		if err := json.NewDecoder(r.Body).Decode(&env); err != nil {
-			http.Error(w, err.Error(), 400)
+			code, msg, details := mapJSONError(err)
+			writeAPIError(w, http.StatusBadRequest, code, msg, details, r, nil, "")
 			return
 		}
 		if err := s.Broker.Publish(&env); err != nil {
-			http.Error(w, err.Error(), 422)
+			code, msg, details := mapEnvelopeError(err)
+			writeAPIError(w, http.StatusUnprocessableEntity, code, msg, details, r, &env, env.From)
 			return
 		}
 		writeJSON(w, map[string]any{"ok": true, "id": env.ID})
@@ -149,6 +151,7 @@ func (s *Server) Handler(webapp []byte) http.Handler {
 		writeJSON(w, s.Broker.Claims().Get(r.PathValue("nickname")))
 	})
 	mux.HandleFunc("POST /api/username_claims", func(w http.ResponseWriter, r *http.Request) {
+		defer RecoverAndLog(r)
 		var req struct {
 			Nickname  string `json:"nickname"`
 			Handle    string `json:"handle"`
@@ -158,7 +161,8 @@ func (s *Server) Handler(webapp []byte) http.Handler {
 			ClaimMsg  string `json:"claim_message"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), 400)
+			code, msg, details := mapJSONError(err)
+			writeAPIError(w, http.StatusBadRequest, code, msg, details, r, nil, "")
 			return
 		}
 		rec := &ClaimRecord{
@@ -171,7 +175,8 @@ func (s *Server) Handler(webapp []byte) http.Handler {
 		}
 		winner, ok, err := s.Broker.Claims().Claim(rec)
 		if err != nil {
-			http.Error(w, err.Error(), 422)
+			code, msg, details := mapClaimError(err)
+			writeAPIError(w, http.StatusUnprocessableEntity, code, msg, details, r, nil, req.Handle)
 			return
 		}
 		writeJSON(w, map[string]any{"ok": ok, "winner": winner})
@@ -309,7 +314,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	var hello struct{ Handle string `json:"handle"` }
+	var hello struct {
+		Handle string `json:"handle"`
+	}
 	if err := ws.ReadJSON(&hello); err != nil || hello.Handle == "" {
 		ws.Close()
 		return

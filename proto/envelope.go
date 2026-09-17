@@ -60,12 +60,19 @@ var (
 )
 
 // ProtoError is a protocol validation error.
-type ProtoError struct{ Msg string }
+type ProtoError struct {
+	Msg   string `json:"msg"`
+	Field string `json:"field,omitempty"`
+}
 
 func (e *ProtoError) Error() string { return "proto: " + e.Msg }
 
 func perr(format string, args ...any) error {
 	return &ProtoError{Msg: fmt.Sprintf(format, args...)}
+}
+
+func perrField(field, format string, args ...any) error {
+	return &ProtoError{Field: field, Msg: fmt.Sprintf(format, args...)}
 }
 
 // NewID returns a random 16-byte hex id (GUID-shaped, no deps).
@@ -142,7 +149,7 @@ type ToolCall struct {
 // StatusBody is a D-class response produced by the BROKER for a cmd.
 // Upstream observers see only this — never the raw command mechanics.
 type StatusBody struct {
-	Cmd    string          `json:"cmd,omitempty"`    // e.g. "list_users"
+	Cmd    string          `json:"cmd,omitempty"` // e.g. "list_users"
 	OK     bool            `json:"ok"`
 	State  string          `json:"state,omitempty"`  // running | ok | error
 	Text   string          `json:"text,omitempty"`   // human/agent-readable line
@@ -169,7 +176,7 @@ type Envelope struct {
 	Result json.RawMessage `json:"result,omitempty"`
 	Fail   *Failure        `json:"fail,omitempty"`
 	Fanout *Fanout         `json:"fanout,omitempty"`
-	Tool   *ToolCall       `json:"tool,omitempty"`  // kind=tool_call|tool_result
+	Tool   *ToolCall       `json:"tool,omitempty"`   // kind=tool_call|tool_result
 	Status *StatusBody     `json:"status,omitempty"` // kind=status
 
 	// AboutTaskID is the task lifecycle join key. Accepts BOTH wire shapes:

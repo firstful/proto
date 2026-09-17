@@ -122,7 +122,7 @@ func (s *ClaimsStore) List() []*ClaimRecord {
 }
 
 var (
-	errInvalidClaim = &ProtoError{"invalid claim record"}
-	errClaimExpired = &ProtoError{"claim expired"}
-	errBadSignature = &ProtoError{"bad signature"}
+	errInvalidClaim = &ProtoError{Msg: "invalid claim record", Field: "record"}
+	errClaimExpired = &ProtoError{Msg: "claim expired", Field: "timestamp"}
+	errBadSignature = &ProtoError{Msg: "bad signature", Field: "signature"}
 )

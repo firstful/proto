@@ -36,8 +36,8 @@ type Broker struct {
 	waiters   map[string][]chan struct{} // "task:<id>" / "fanout:<id>" gather keys
 	waitersMu sync.Mutex
 	cmds      map[string]CmdFunc // !{name} broker commands (D-class)
-	claims    *ClaimsStore         // durable username claims
-	policy    *PolicyEngine        // API-layer enforcement (broker = choke point)
+	claims    *ClaimsStore       // durable username claims
+	policy    *PolicyEngine      // API-layer enforcement (broker = choke point)
 }
 
 func NewBroker(journalPath string) *Broker {
@@ -413,10 +413,10 @@ func (b *Broker) Rooms() map[string][]string {
 
 // AgentInfo is one handle in the multiplexed directory.
 type AgentInfo struct {
-	Handle  string `json:"handle"`
-	Live    bool   `json:"live"`    // has an attached subscriber (ws/api client)
-	Parked  int    `json:"parked"`  // envelopes waiting in its durable queue
-	Sent    int64  `json:"sent"`    // envelopes routed to it
+	Handle string `json:"handle"`
+	Live   bool   `json:"live"`   // has an attached subscriber (ws/api client)
+	Parked int    `json:"parked"` // envelopes waiting in its durable queue
+	Sent   int64  `json:"sent"`   // envelopes routed to it
 }
 
 // Agents lists every handle the broker has routed to — Hermes profiles

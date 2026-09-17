@@ -25,13 +25,13 @@ import (
 
 // Policy is the declarative per-profile policy.
 type Policy struct {
-	Default     string   `yaml:"default"     json:"default"`
+	Default      string   `yaml:"default"     json:"default"`
 	AllowedPeers []string `yaml:"allowed_peers" json:"allowed_peers"`
 	AllowedRooms []string `yaml:"allowed_rooms" json:"allowed_rooms"`
 	// AllowedActions gates envelope kinds: msg, task, results (result), ack,
 	// task_info, cmd, claim, announce, delegate, fanout.
 	AllowedActions []string `yaml:"allowed_actions" json:"allowed_actions"`
-	OnBehalfOf string `yaml:"on_behalf_of" json:"on_behalf_of"` // allow|deny
+	OnBehalfOf     string   `yaml:"on_behalf_of" json:"on_behalf_of"` // allow|deny
 }
 
 // Grant is a temporary one-directional send channel from → to.
@@ -44,7 +44,14 @@ type Grant struct {
 }
 
 // PolicyError is returned when a send/delegate/fanout violates policy.
-type PolicyError struct{ Msg string }
+type PolicyError struct {
+	Msg     string `json:"msg"`
+	Profile string `json:"profile,omitempty"`
+	Action  string `json:"action,omitempty"`
+	Peer    string `json:"peer,omitempty"`
+	Room    string `json:"room,omitempty"`
+	Field   string `json:"field,omitempty"`
+}
 
 func (e *PolicyError) Error() string { return "proto: " + e.Msg }
 
@@ -58,9 +65,9 @@ func ProfileFromHandle(handle string) string {
 }
 
 const (
-	defaultPolicyDir = "/etc/proto/policies"
+	defaultPolicyDir  = "/etc/proto/policies"
 	defaultGrantsPath = "/etc/proto/grants.json"
-	adminProfile = "rook" // the default/root profile: unrestricted
+	adminProfile      = "rook" // the default/root profile: unrestricted
 )
 
 // policyDirFromEnv returns the policy dir, or "" when enforcement is disabled
@@ -191,10 +198,11 @@ func (pe *PolicyEngine) CheckRoomJoin(room, handle string) error {
 
 // loadPolicy returns the hot-reloaded policy for a profile (nil = deny).
 // Policy files use flat KEY=VALUE lines (no YAML dep): e.g.
-//   allowed_peers=rook,kube
-//   allowed_actions=status,send,results,task_info
-//   allowed_rooms=
-//   on_behalf_of=deny
+//
+//	allowed_peers=rook,kube
+//	allowed_actions=status,send,results,task_info
+//	allowed_rooms=
+//	on_behalf_of=deny
 func (pe *PolicyEngine) loadPolicy(profile string) *Policy {
 	path := filepath.Join(pe.policyDir, profile+".policy")
 	st, err := os.Stat(path)

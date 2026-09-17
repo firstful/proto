@@ -7,29 +7,29 @@ import (
 
 // TaskRecord tracks one task's lifecycle in the ledger.
 type TaskRecord struct {
-	TaskID    string     `json:"task_id"`
-	RootTask  string     `json:"root_task,omitempty"` // walks parent_task chain to the top
-	ParentTask string    `json:"parent_task,omitempty"`
-	Children  []string   `json:"children,omitempty"`  // child task ids
-	Kind      Kind       `json:"kind"`
-	From      string     `json:"from"`
-	To        Target     `json:"to"`
-	OpenedTS  time.Time  `json:"opened_ts"`
-	Status    string     `json:"status"` // open | done | failed
-	ClosedTS  *time.Time `json:"closed_ts,omitempty"`
-	Results   int        `json:"results"`
-	Fails     int        `json:"fails"`
+	TaskID     string     `json:"task_id"`
+	RootTask   string     `json:"root_task,omitempty"` // walks parent_task chain to the top
+	ParentTask string     `json:"parent_task,omitempty"`
+	Children   []string   `json:"children,omitempty"` // child task ids
+	Kind       Kind       `json:"kind"`
+	From       string     `json:"from"`
+	To         Target     `json:"to"`
+	OpenedTS   time.Time  `json:"opened_ts"`
+	Status     string     `json:"status"` // open | done | failed
+	ClosedTS   *time.Time `json:"closed_ts,omitempty"`
+	Results    int        `json:"results"`
+	Fails      int        `json:"fails"`
 }
 
 // FanoutRecord tracks a fanout barrier.
 type FanoutRecord struct {
-	FanoutID   string    `json:"fanout_id"`
-	ParentTask string    `json:"parent_task,omitempty"`
-	Expected   []string  `json:"expected"` // peer handles in the plan
-	Barrier    Barrier   `json:"barrier"`
-	Got        []string  `json:"got"` // peers that reported
-	Status     string    `json:"status"`
-	OpenedTS   time.Time `json:"opened_ts"`
+	FanoutID   string     `json:"fanout_id"`
+	ParentTask string     `json:"parent_task,omitempty"`
+	Expected   []string   `json:"expected"` // peer handles in the plan
+	Barrier    Barrier    `json:"barrier"`
+	Got        []string   `json:"got"` // peers that reported
+	Status     string     `json:"status"`
+	OpenedTS   time.Time  `json:"opened_ts"`
 	ClosedTS   *time.Time `json:"closed_ts,omitempty"`
 }
 
@@ -184,14 +184,14 @@ func (l *Ledger) Fanouts() map[string]*FanoutRecord {
 
 // TaskTree is a recursive rollup of a delegation tree under one root task.
 type TaskTree struct {
-	TaskID    string      `json:"task_id"`
-	RootTask  string      `json:"root_task"`
-	Status    string      `json:"status"` // aggregated: done iff all descendants done
-	Open      int         `json:"open"`
-	Done      int         `json:"done"`
-	Failed    int         `json:"failed"`
-	Total     int         `json:"total"`
-	Root      *TaskRecord `json:"root"`
+	TaskID     string        `json:"task_id"`
+	RootTask   string        `json:"root_task"`
+	Status     string        `json:"status"` // aggregated: done iff all descendants done
+	Open       int           `json:"open"`
+	Done       int           `json:"done"`
+	Failed     int           `json:"failed"`
+	Total      int           `json:"total"`
+	Root       *TaskRecord   `json:"root"`
 	Descendant []*TaskRecord `json:"descendants,omitempty"`
 }
 

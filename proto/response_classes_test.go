@@ -37,10 +37,10 @@ func TestResponseClasses(t *testing.T) {
 		}
 	}, nil)
 	_ = b.Publish(&Envelope{Kind: KindToolCall, From: "AgentA", To: Target{Peer: "AgentB"},
-		Tool: &ToolCall{Name: "search", Args: map[string]any{"q": "x"}},
+		Tool:        &ToolCall{Name: "search", Args: map[string]any{"q": "x"}},
 		ReplyTarget: &Target{Peer: "AgentA"}})
 	_ = b.Publish(&Envelope{Kind: KindToolResult, From: "AgentA", To: Target{Peer: "AgentB"},
-		Tool: &ToolCall{Name: "search", Result: json.RawMessage(`{"hits":3}`)},
+		Tool:        &ToolCall{Name: "search", Result: json.RawMessage(`{"hits":3}`)},
 		ReplyTarget: &Target{Peer: "AgentA"}})
 	for i := 0; i < 2; i++ {
 		select {

@@ -26,7 +26,7 @@ func setupPolicyDir(t *testing.T, files map[string]string) *PolicyEngine {
 
 func TestPolicyEnforcement(t *testing.T) {
 	pe := setupPolicyDir(t, map[string]string{
-		"dev": "default=deny\nallowed_peers=rook\nallowed_actions=send,status,results,task_info\non_behalf_of=deny\n",
+		"dev":   "default=deny\nallowed_peers=rook\nallowed_actions=send,status,results,task_info\non_behalf_of=deny\n",
 		"cloud": "default=deny\nallowed_peers=rook\nallowed_actions=status,send\non_behalf_of=deny\n",
 	})
 
