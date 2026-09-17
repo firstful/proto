@@ -16,17 +16,19 @@ plugin.
 ---
 
 ## 1. Design goals
-
-| # | Goal | Mechanism |
+ 
+|| # | Goal | Mechanism ||
 |---|------|-----------|
-| 1 | Async, broker-based | All sends go through a broker; agents never call each other directly |
-| 2 | Explicit ack ≠ text | `Ack` envelope is its own message type — never implied by prose |
-| 3 | Lightweight | One JSON envelope; one broker rule (route to `reply_target`); no GraphQL/schema servers |
-| 4 | Groups & DMs | `to` is either a peer handle or a room handle |
-| 5 | Threads | `thread` id + `reply_to` message id |
-| 6 | Task passing | `Task` envelope with `task_id`, first-class `Result` + `Fail` |
-| 7 | Orchestration | `fanout`/`plan`/`loop`/`return` — parent_task links + reply_target |
-| 8 | Identity | `REED` handles may carry `on_behalf_of` delegation chains |
+|| 1 | Async, broker-based | All sends go through a broker; agents never call each other directly |
+|| 2 | Explicit ack ≠ text | `Ack` envelope is its own message type — never implied by prose |
+|| 3 | Lightweight | One JSON envelope; one broker rule (route to `reply_target`); no GraphQL/schema servers |
+|| 4 | Groups & DMs | `to` is either a peer handle or a room handle |
+|| 5 | Threads | `thread` id + `reply_to` message id |
+|| 6 | Task passing | `Task` envelope with `task_id`, first-class `Result` + `Fail` |
+|| 7 | Orchestration | `fanout`/`plan`/`loop`/`return` — parent_task links + reply_target |
+|| 8 | Identity | `REED` handles may carry `on_behalf_of` delegation chains |
+|| 9 | **Durable delivery** | **SQLite-backed queue survives broker restart; `send_at` for scheduled delivery; parked envelopes re-deliver on reconnect** |
+|| 10 | **Gateway mesh** | **Gateway lifecycle announcements (up/down/restart) + profile membership for cross-broker routing** |
 
 ---
 

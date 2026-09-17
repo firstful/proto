@@ -37,6 +37,7 @@ type Broker struct {
 	waitersMu sync.Mutex
 	cmds      map[string]CmdFunc // !{name} broker commands (D-class)
 	claims    *ClaimsStore         // durable username claims
+	policy    *PolicyEngine        // API-layer enforcement (broker = choke point)
 }
 
 func NewBroker(journalPath string) *Broker {
@@ -51,6 +52,7 @@ func NewBroker(journalPath string) *Broker {
 		ringMax: 5000,
 		waiters: map[string][]chan struct{}{},
 		claims:  NewClaimsStore(),
+		policy:  NewPolicyEngine(),
 	}
 	if journalPath != "" {
 		b.journal = OpenJournal(journalPath)
@@ -145,6 +147,57 @@ func (b *Broker) Publish(env *Envelope) error {
 	}
 	b.seen[env.ID] = true
 	b.mu.Unlock()
+
+	// ── API-layer policy enforcement (broker is the choke point) ─────────
+	// Kinds map to policy actions; results/fail/ack are replies that follow
+	// the task channel and are always permitted back upstream.
+	pe := b.policy
+	pe.ReloadGrants() // hot-reload grants (cheap stat+parse on change)
+	pe.SweepGrants()
+	switch env.Kind {
+	case KindMsg, KindStatus:
+		if err := pe.Check(env.From, "send", env.To.Peer, env.To.Room, env.OnBehalfOf); err != nil {
+			return err
+		}
+	case KindTask, KindToolCall:
+		action := "task"
+		if env.Task != nil && env.Task.Action != "" {
+			action = "task." + env.Task.Action
+		}
+		if err := pe.Check(env.From, action, env.To.Peer, env.To.Room, env.OnBehalfOf); err != nil {
+			// allow the canonical "task" action as a catch-all
+			if _, ok := err.(*PolicyError); ok && action != "task" {
+				if err2 := pe.Check(env.From, "task", env.To.Peer, env.To.Room, env.OnBehalfOf); err2 != nil {
+					return err
+				}
+			} else {
+				return err
+			}
+		}
+	case KindResult, KindFail, KindAck:
+		// replies flow back along the reply chain — always permitted
+	case KindInvite, KindLeave:
+		if err := pe.Check(env.From, "send", env.To.Peer, env.To.Room, env.OnBehalfOf); err != nil {
+			return err
+		}
+	case KindCmd:
+		// D-class: commands execute broker-side; policy-check by cmd name
+		if m := cmdRe.FindStringSubmatch(env.Text); m != nil {
+			// every profile gets the safe builtin read-only cmds; other cmds
+			// need an explicit "cmd.<name>" (or blanket "cmd") in the policy
+			builtin := map[string]bool{"ping": true, "list_agents": true,
+				"list_rooms": true, "list_tasks": true, "get_task": true,
+				"task_tree": true}
+			if builtin[m[1]] {
+				break
+			}
+			if err := pe.Check(env.From, "cmd."+m[1], env.To.Peer, env.To.Room, env.OnBehalfOf); err != nil {
+				if err2 := pe.Check(env.From, "cmd", env.To.Peer, env.To.Room, env.OnBehalfOf); err2 != nil {
+					return err
+				}
+			}
+		}
+	}
 
 	// D-class: broker-intercepted commands (SPEC §2.3 D). The command is
 	// NEVER delivered to peers — the sender's reply_target gets a status

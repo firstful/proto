@@ -56,8 +56,64 @@ func (s *Server) Handler(webapp []byte) http.Handler {
 		writeJSON(w, s.Broker.Agents())
 	})
 	mux.HandleFunc("POST /api/rooms/{room}/join/{handle}", func(w http.ResponseWriter, r *http.Request) {
-		s.Broker.Join(r.PathValue("room"), r.PathValue("handle"))
+		room, handle := r.PathValue("room"), r.PathValue("handle")
+		if err := s.Broker.policy.CheckRoomJoin(room, handle); err != nil {
+			http.Error(w, err.Error(), 403)
+			return
+		}
+		s.Broker.Join(room, handle)
 		writeJSON(w, map[string]any{"ok": true})
+	})
+	mux.HandleFunc("POST /api/policy/grant", func(w http.ResponseWriter, r *http.Request) {
+		// Rook-minted temporary send channel. Only the admin profile may mint.
+		var req struct {
+			From    string `json:"from"`
+			To      string `json:"to"`
+			TTLSec  int    `json:"ttl_sec"`
+			Reason  string `json:"reason"`
+			Request string `json:"requester"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		if ProfileFromHandle(req.Request) != adminProfile {
+			http.Error(w, "proto: only the admin profile may mint grants", 403)
+			return
+		}
+		if req.From == "" || req.To == "" {
+			http.Error(w, "from and to required", 400)
+			return
+		}
+		if req.TTLSec <= 0 {
+			req.TTLSec = 1800
+		}
+		if req.TTLSec > 24*3600 {
+			req.TTLSec = 24 * 3600 // hard cap: 24h, re-ask to renew
+		}
+		g := s.Broker.policy.Grant(req.From, req.To, time.Duration(req.TTLSec)*time.Second, req.Reason)
+		writeJSON(w, map[string]any{"ok": true, "grant": g})
+	})
+	mux.HandleFunc("POST /api/policy/revoke", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			From     string `json:"from"`
+			To       string `json:"to"`
+			Request  string `json:"requester"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		if ProfileFromHandle(req.Request) != adminProfile {
+			http.Error(w, "proto: only the admin profile may revoke grants", 403)
+			return
+		}
+		n := s.Broker.policy.Revoke(req.From, req.To)
+		writeJSON(w, map[string]any{"ok": true, "revoked": n})
+	})
+	mux.HandleFunc("GET /api/policy/grants", func(w http.ResponseWriter, r *http.Request) {
+		s.Broker.policy.SweepGrants()
+		writeJSON(w, map[string]any{"grants": s.Broker.policy.Grants()})
 	})
 	mux.HandleFunc("POST /api/envelope", func(w http.ResponseWriter, r *http.Request) {
 		var env Envelope
@@ -140,6 +196,10 @@ func (s *Server) Handler(webapp []byte) http.Handler {
 		if req.TimeoutSec <= 0 {
 			req.TimeoutSec = 30
 		}
+		if err := s.Broker.policy.Check(req.From, "task", req.Peer, "", req.OnBehalfOf); err != nil {
+			http.Error(w, err.Error(), 403)
+			return
+		}
 		ctx, cancel := contextWithTimeout(r, req.TimeoutSec)
 		defer cancel()
 		c := Attach(s.Broker, req.From)
@@ -170,6 +230,12 @@ func (s *Server) Handler(webapp []byte) http.Handler {
 		}
 		if req.TimeoutSec <= 0 {
 			req.TimeoutSec = 60
+		}
+		for _, p := range req.Peers {
+			if err := s.Broker.policy.Check(req.From, "task", p, "", req.OnBehalfOf); err != nil {
+				http.Error(w, err.Error(), 403)
+				return
+			}
 		}
 		ctx, cancel := contextWithTimeout(r, req.TimeoutSec)
 		defer cancel()
